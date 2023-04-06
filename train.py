@@ -85,7 +85,7 @@ d = dataset('train', path=Path(DATASET_DIR), imgsize=image_size)
 d_val = dataset('val', path=Path(DATASET_DIR), imgsize=image_size)
 
 loader = MultiEpochsDataLoader(d, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=DL_WORKERS)
-loader_val = DataLoader(d_val, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=DL_WORKERS)
+loader_val = DataLoader(d_val, batch_size=128, shuffle=True, drop_last=True, num_workers=DL_WORKERS)   # todo: fix batch size after the image viewer size is made dynamic
 
 # ===== Model and Optimizer =====
 model = XUNet(H=image_size, W=image_size, ch=128)
@@ -113,13 +113,13 @@ for epoch in range(NUM_EPOCHS):
     print(f'starting epoch {epoch}')
 
     # ===== Train loop - Batch =====
-    for img, R, T, K in tqdm(loader):
-        current_batch_size = img.shape[0]
+    for image_samples, R, T, K in tqdm(loader):
+        current_batch_size = image_samples.shape[0]
         warmup(optimizer, step, WARMUP_STEPS, LEARNING_RATE)
         optimizer.zero_grad()
 
         logsnr = logsnr_schedule_cosine(torch.rand((current_batch_size,)))
-        loss = p_losses(model, img=img.to(device), R=R.to(device), T=T.to(device), K=K.to(device), logsnr=logsnr.to(device), loss_type="l2", cond_prob=0.1)
+        loss = p_losses(model, img=image_samples.to(device), R=R.to(device), T=T.to(device), K=K.to(device), logsnr=logsnr.to(device), loss_type="l2", cond_prob=0.1)
         loss.backward()
         optimizer.step()
 
@@ -147,14 +147,15 @@ for epoch in range(NUM_EPOCHS):
                 current_batch_size = original_img.shape[0]
                 w = torch.tensor(
                     [0, 1, 2, 3, 4, 5, 6, 7] * (current_batch_size // 8) + list(range(current_batch_size % 8)))
-                img = sample(model, img=original_img, R=R, T=T, K=K, w=w)
-                img = rearrange(((img[-1].clip(-1, 1) + 1) * 127.5).astype(np.uint8), "(b a) c h w -> a c h (b w)", a=8,
-                                b=16)
+                image_samples = sample(model, img=original_img, R=R, T=T, K=K, w=w)
+
+                # todo: need to fix the below - currently hard coded to batch_size=128. currently will update the batch size back to 128
+                image_samples = rearrange(((image_samples[-1].clip(-1, 1) + 1) * 127.5).astype(np.uint8), "(b a) c h w -> a c h (b w)", a=8, b=16)
                 gt = rearrange(((original_img[:, 1] + 1) * 127.5).detach().cpu().numpy().astype(np.uint8),
                                "(b a) c h w -> a c h (b w)", a=8, b=16)
                 cd = rearrange(((original_img[:, 0] + 1) * 127.5).detach().cpu().numpy().astype(np.uint8),
                                "(b a) c h w -> a c h (b w)", a=8, b=16)
-                fi = np.concatenate([cd, gt, img], axis=2)
+                fi = np.concatenate([cd, gt, image_samples], axis=2)
                 for i, ww in enumerate([0, 1, 2, 3, 4, 5, 6, 7]):
                     writer.add_image(f"train/{ww}", fi[i], step)
                 break
