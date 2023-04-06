@@ -1,3 +1,5 @@
+import argparse
+from functions import logsnr_schedule_cosine, p_losses, warmup, sample
 from xunet import XUNet
 
 import torch
@@ -9,227 +11,136 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from einops import rearrange
 import time
+from pathlib import Path
 
 from SRNdataset import dataset, MultiEpochsDataLoader
 from tensorboardX import SummaryWriter
 import os
 
+
+# ===== Parse command line arguments =====
+argparser = argparse.ArgumentParser()
+argparser.add_argument('--outdir', type=str, default='./output', help='output folder')
+argparser.add_argument('--datadir', type=str, default='../../datasets/cats', help='dataset folder')
+argparser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
+# argparser.add_argument('--timesteps', type=int, default=300, help='model number of timesteps (T)')
+argparser.add_argument('--epochs', type=int, default=100, help='number of training epochs')
+argparser.add_argument('--batchsize', type=int, default=128, help='train batch size')
+# argparser.add_argument('--randomseed', type=int, default=123, help='initial random seed')
+argparser.add_argument('--checkpointpath', type=str, default=None, help='start from saved model')
+# argparser.add_argument('--betastart', type=float, default=1e-4, help='diffusion model noise scheduler beta start')
+# argparser.add_argument('--betaend', type=float, default=2e-2, help='diffusion model noise scheduler beta end')
+argparser.add_argument('--checkpointevery', type=int, default=10, help='save checkpoint every N epochs, 0 for disable')
+argparser.add_argument('--inferonly', type=int, default=0, help='0 - train. 1 - Only sample from model, no training')
+argparser.add_argument('--warmupsteps', type=int, default=None, help='amount of steps fpr warmup')
+
+argparser.add_argument('--onedlworker', type=int, default=0, help='Use single dataloader worker')
+argparser.add_argument('--onebatchperepoch', type=int, default=0, help='For debug purposes')
+argparser.add_argument('--ideoverride', type=int, default=0, help='For debug purposes')
+
+args = argparser.parse_args()
+ONE_BATCH_PER_EPOCH = args.onebatchperepoch
+CHECKPOINT_PATH = args.checkpointpath
+OUTPUT_DIR = args.outdir
+DATASET_DIR = args.datadir
+# TIMESTEPS = args.timesteps
+LEARNING_RATE = args.lr
+NUM_EPOCHS = args.epochs
+BATCH_SIZE = args.batchsize
+# RANDOM_SEED = args.randomseed
+ONE_DL_WORKER = args.onedlworker
+# BETA_START = args.betastart
+# BETA_END = args.betaend
+CHECKPOINT_EVERY = args.checkpointevery
+INFER_ONLY = args.inferonly
+WARMUP_STEPS = args.warmupsteps
+IDE_OVERRIDE = args.ideoverride
+
+if WARMUP_STEPS is None:
+    WARMUP_STEPS = 10000000/BATCH_SIZE
+
+# IDE Debug settings
+if IDE_OVERRIDE == 1:
+    ONE_DL_WORKER = 1
+    ONE_BATCH_PER_EPOCH = 1
+    BATCH_SIZE = 2
+    CHECKPOINT_EVERY = 1
+
+# ===== CPU / GPU selection =====
+# Note - works only on GPU at the moment
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print(f'device: {device}')
+
+# ===== Data =====
 image_size = 64
-batch_size = 128
+batch_size = BATCH_SIZE
 
-d = dataset('train', path='./data/SRN/cars_train', imgsize=image_size)
-d_val = dataset('val', path='./data/SRN/cars_train', imgsize=image_size)
+d = dataset('train', path=Path('../datasets/srn_cars/cars_train'), imgsize=image_size)
+d_val = dataset('val', path='../datasets/srn_cars/cars_train', imgsize=image_size)
 
-loader = MultiEpochsDataLoader(d, batch_size=batch_size, shuffle=True, drop_last=True, num_workers=40)
-loader_val = DataLoader(d_val, batch_size=128, shuffle=True, drop_last=True, num_workers=16)
+if ONE_DL_WORKER:
+    loader = MultiEpochsDataLoader(d, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=0)
+    loader_val = DataLoader(d_val, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=0)
+else:
+    loader = MultiEpochsDataLoader(d, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=40)
+    loader_val = DataLoader(d_val, batch_size=128, shuffle=True, drop_last=True, num_workers=16)
 
-device = "cuda:0"
 
+# ===== Model and Optimizer =====
 model = XUNet(H=image_size, W=image_size, ch=128)
 model = torch.nn.DataParallel(model)
 model.to(device)
+optimizer = Adam(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.99))
 
-optimizer = Adam(model.parameters(), lr=1e-4, betas=(0.9, 0.99))
-
-
-
-
-def logsnr_schedule_cosine(t, *, logsnr_min=-20., logsnr_max=20.):
-    b = np.arctan(np.exp(-.5 * logsnr_max))
-    a = np.arctan(np.exp(-.5 * logsnr_min)) - b
-    
-    return -2. * torch.log(torch.tan(a * t + b))
-
-def xt2batch(x, logsnr, z, R, T, K):
-    b = x.shape[0]
-
-    return {
-        'x': x.cuda(),
-        'z': z.cuda(),
-        'logsnr': torch.stack([logsnr_schedule_cosine(torch.zeros_like(logsnr)), logsnr], dim=1).cuda(),
-        'R': R.cuda(),
-        't': T.cuda(),
-        'K':K.cuda(),
-    }
-
-def q_sample(z, logsnr, noise):
-    
-    # lambdas = logsnr_schedule_cosine(t)
-    
-    alpha = logsnr.sigmoid().sqrt()
-    sigma = (-logsnr).sigmoid().sqrt()
-    
-    alpha = alpha[:,None, None, None]
-    sigma = sigma[:,None, None, None]
-
-    return alpha * z + sigma * noise
-
-def p_losses(denoise_model, img, R, T, K, logsnr, noise=None, loss_type="l2", cond_prob=0.1):
-        
-    B = img.shape[0]
-    x = img[:, 0]
-    z = img[:, 1]
-    if noise is None:
-        noise = torch.randn_like(x)
-
-    z_noisy = q_sample(z=z, logsnr=logsnr, noise=noise)
-    
-    
-    cond_mask = (torch.rand((B,)) > cond_prob).cuda()
-    
-    x_condition = torch.where(cond_mask[:, None, None, None], x, torch.randn_like(x))
-    
-    batch = xt2batch(x=x_condition, logsnr=logsnr, z=z_noisy, R=R, T=T, K=K)
-    
-    predicted_noise = denoise_model(batch, cond_mask=cond_mask.cuda())
-
-    if loss_type == 'l1':
-        loss = F.l1_loss(noise.to(device), predicted_noise)
-    elif loss_type == 'l2':
-        loss = F.mse_loss(noise.to(device), predicted_noise)
-    elif loss_type == "huber":
-        loss = F.smooth_l1_loss(noise.to(device), predicted_noise)
-    else:
-        raise NotImplementedError()
-
-    return loss
-
-
-@torch.no_grad()
-def sample(model, img, R, T, K, w, timesteps=256):
-    x = img[:, 0]
-    img = torch.randn_like(x)
-    imgs = []
-    
-    logsnrs = logsnr_schedule_cosine(torch.linspace(1., 0., timesteps+1)[:-1])
-    logsnr_nexts = logsnr_schedule_cosine(torch.linspace(1., 0., timesteps+1)[1:])
-    
-    for logsnr, logsnr_next in tqdm(zip(logsnrs, logsnr_nexts)): # [1, ..., 0] = size is 257
-        img = p_sample(model, x=x, z=img, R=R, T=T, K=K, logsnr=logsnr, logsnr_next=logsnr_next, w=w)
-        imgs.append(img.cpu().numpy())
-    return imgs
-
-@torch.no_grad()
-def p_sample(model, x, z, R, T, K, logsnr, logsnr_next, w):
-    
-    
-    model_mean, model_variance = p_mean_variance(model, x=x, z=z, R=R, T=T, K=K, logsnr=logsnr, logsnr_next=logsnr_next, w=w)
-    
-    if logsnr_next==0:
-        return model_mean
-    
-    return model_mean + model_variance.sqrt() * torch.randn_like(x).cpu()
-
-
-@torch.no_grad()
-def p_mean_variance(model, x, z, R, T, K, logsnr, logsnr_next, w=2.0):
-    
-    
-    strt = time.time()
-    b = x.shape[0]
-    w = w[:, None, None, None]
-    
-    c = - torch.special.expm1(logsnr - logsnr_next)
-    
-
-    squared_alpha, squared_alpha_next = logsnr.sigmoid(), logsnr_next.sigmoid()
-    squared_sigma, squared_sigma_next = (-logsnr).sigmoid(), (-logsnr_next).sigmoid()
-    
-    alpha, sigma, alpha_next = map(lambda x: x.sqrt(), (squared_alpha, squared_sigma, squared_alpha_next))
-    
-    # batch = xt2batch(x, logsnr.repeat(b), z, R)
-    batch = xt2batch(x, logsnr.repeat(b), z, R, T, K)
-    
-    strt = time.time()
-    pred_noise = model(batch, cond_mask= torch.tensor([True]*b)).detach().cpu()
-    batch['x'] = torch.randn_like(x).cuda()
-    pred_noise_unconditioned = model(batch, cond_mask= torch.tensor([False]*b)).detach().cpu()
-    
-    pred_noise_final = (1+w) * pred_noise - w * pred_noise_unconditioned
-    
-    z = z.detach().cpu()
-    
-    z_start = (z - sigma * pred_noise_final) / alpha
-    z_start.clamp_(-1., 1.)
-    
-    model_mean = alpha_next * (z * (1 - c) / alpha + c * z_start)
-    
-    posterior_variance = squared_sigma_next * c
-    
-    return model_mean, posterior_variance
-
-
-def warmup(optimizer, step, last_step, last_lr):
-    
-    if step < last_step:
-        optimizer.param_groups[0]['lr'] = step / last_step * last_lr
-        
-    else:
-        optimizer.param_groups[0]['lr'] = last_lr
-        
-
-import argparse
-parser = argparse.ArgumentParser()
-parser.add_argument('--transfer',type=str, default="")
-args = parser.parse_args()
-
-
-if args.transfer == "":
-    now = './results/shapenet_SRN_car/'+str(int(time.time()))
-    writer = SummaryWriter(now)
+# ===== Load Model and Optimizer from checkpoint =====
+if CHECKPOINT_PATH is None:
+    checkpoint_path = Path(OUTPUT_DIR) / Path(str(int(time.time())))
+    writer = SummaryWriter(checkpoint_path)
     step = 0
+
 else:
-    print('transfering from: ', args.transfer)
-    
-    ckpt = torch.load(os.path.join(args.transfer, 'latest.pt'))
-    
+    checkpoint_path = CHECKPOINT_PATH
+    print('Loading model checkpoint from: ', checkpoint_path)
+    ckpt = torch.load(os.path.join(checkpoint_path, 'latest.pt'))
     model.load_state_dict(ckpt['model'])
     optimizer.load_state_dict(ckpt['optim'])
-    
-    now = args.transfer
-    writer = SummaryWriter(now)
+    writer = SummaryWriter(checkpoint_path)
     step = ckpt['step']
-    
-    
-for e in range(100000):
-    print(f'starting epoch {e}')
-    
-    lt = time.time()
+
+# ===== Train loop - Epoch =====
+for epoch in range(NUM_EPOCHS):
+    print(f'starting epoch {epoch}')
+
+    # ===== Train loop - Batch =====
     for img, R, T, K in tqdm(loader):
-        
-        warmup(optimizer, step, 10000000/batch_size, 0.0001)
-        
-        B = img.shape[0]
-        
-        
+        current_batch_size = img.shape[0]
+        warmup(optimizer, step, WARMUP_STEPS, LEARNING_RATE)
         optimizer.zero_grad()
 
-        logsnr = logsnr_schedule_cosine(torch.rand((B,)))
-        
-        loss = p_losses(model, img=img.cuda(), R=R.cuda(), T=T.cuda(), K=K.cuda(), logsnr=logsnr.cuda(), loss_type="l2", cond_prob=0.1)
+        logsnr = logsnr_schedule_cosine(torch.rand((current_batch_size,)))
+        loss = p_losses(model, img=img.to(device), R=R.to(device), T=T.to(device), K=K.to(device), logsnr=logsnr.to(device), loss_type="l2", cond_prob=0.1)
         loss.backward()
         optimizer.step()
-        
+
         writer.add_scalar("train/loss", loss.item(), global_step=step)
         writer.add_scalar("train/lr", optimizer.param_groups[0]['lr'], global_step=step)
-        
+
+        # Report every 500 batches
         if step % 500 == 0:
             print("Loss:", loss.item())
                 
-            
-        if step % 1000 == 900: 
+        # Evaluate model every 1000 items
+        # if step % 1000 == 900:
+        if True:               # todo: change back to as above
             model.eval()
             with torch.no_grad():
-                for oriimg, R, T, K in loader_val:
-                    
-                    w = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7]).repeat(16)
-                    img = sample(model, img=oriimg, R=R, T=T, K=K, w=w)
-
+                for original_img, R, T, K in loader_val:
+                    current_batch_size = original_img.shape[0]
+                    w = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7] * (current_batch_size // 8) + list(range(current_batch_size % 8)))
+                    img = sample(model, img=original_img, R=R, T=T, K=K, w=w)
                     img = rearrange(((img[-1].clip(-1,1) + 1) * 127.5).astype(np.uint8), "(b a) c h w -> a c h (b w)", a=8, b=16)
-
-                    gt = rearrange(((oriimg[:,1] + 1) * 127.5).detach().cpu().numpy().astype(np.uint8), "(b a) c h w -> a c h (b w)", a=8, b=16)
-                    cd = rearrange(((oriimg[:,0] + 1) * 127.5).detach().cpu().numpy().astype(np.uint8), "(b a) c h w -> a c h (b w)", a=8, b=16)
-
+                    gt = rearrange(((original_img[:, 1] + 1) * 127.5).detach().cpu().numpy().astype(np.uint8), "(b a) c h w -> a c h (b w)", a=8, b=16)
+                    cd = rearrange(((original_img[:, 0] + 1) * 127.5).detach().cpu().numpy().astype(np.uint8), "(b a) c h w -> a c h (b w)", a=8, b=16)
                     fi = np.concatenate([cd, gt, img], axis=2)
                     for i, ww in enumerate([0, 1, 2, 3, 4, 5, 6, 7]):
                         writer.add_image(f"train/{ww}", fi[i], step)
@@ -237,14 +148,14 @@ for e in range(100000):
             print('image sampled!')
             writer.flush()
             model.train()
-            
-        
-        if step == int(10000000/batch_size):
-            torch.save({'optim':optimizer.state_dict(), 'model':model.state_dict(), 'step':step}, now+f"/after_warmup.pt")
+
+        if step == int(WARMUP_STEPS):
+            torch.save({'optim':optimizer.state_dict(), 'model':model.state_dict(), 'step':step}, checkpoint_path + f"/after_warmup.pt")
         
         step += 1
-        starttime = time.time()
-        
-    
-    if e%20 == 0:
-        torch.save({'optim':optimizer.state_dict(), 'model':model.state_dict(), 'step':step, 'epoch':e}, now+f"/latest.pt")
+
+        if ONE_BATCH_PER_EPOCH != 0:        # debug parameter: stop after one batch
+            break
+
+    if epoch % CHECKPOINT_EVERY == 0:
+        torch.save({'optim':optimizer.state_dict(), 'model':model.state_dict(), 'step':step, 'epoch':epoch}, checkpoint_path + f"/latest.pt")

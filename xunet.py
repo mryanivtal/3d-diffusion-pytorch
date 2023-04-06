@@ -37,7 +37,7 @@ def posenc_ddpm(timesteps, emb_ch: int, max_time=1000.):
     half_dim = emb_ch // 2
     # 10000 is the magic number from transformers.
     emb = np.log(10000) / (half_dim - 1)
-    emb = torch.exp(torch.arange(half_dim) * -emb).to(device=timesteps.get_device())
+    emb = torch.exp(torch.arange(half_dim) * -emb).to(device)
     emb = emb.reshape(*([1] * (timesteps.ndim - 1)), emb.shape[-1])
     emb = timesteps[..., None] * emb
     emb = torch.concat([torch.sin(emb), torch.cos(emb)], dim=-1).float()
@@ -49,7 +49,7 @@ def posenc_nerf(x, min_deg=0, max_deg=15):
     """Concatenate x and its positional encodings, following NeRF."""
     if min_deg == max_deg:
         return x
-    scales = torch.tensor([2**i for i in range(min_deg, max_deg)]).float().to(x.get_device())
+    scales = torch.tensor([2**i for i in range(min_deg, max_deg)]).float().to(device)
     
     xb = rearrange(
       (x[..., None, :] * scales[:, None]), "b f h w c d -> b f h w (c d)")
@@ -164,8 +164,8 @@ class AttnLayer(torch.nn.Module):
         
     def forward(self, q, kv):
         
-        assert len(q.shape) == 3, "make sure the size if [B, C, H*W]"
-        assert len(kv.shape) == 3, "make sure the size if [B, C, H*W]"
+        assert len(q.shape) == 3, "make sure the size if [current_batch_size, C, H*W]"
+        assert len(kv.shape) == 3, "make sure the size if [current_batch_size, C, H*W]"
         assert q.shape[1] == self.in_channels
         
         q = rearrange(q, "b c l -> b l c")
@@ -313,8 +313,8 @@ class ConditioningProcessor(torch.nn.Module):
             spec=cam_spec, world_from_cam=world_from_cam).rays()
         
         
-        pose_emb_pos = posenc_nerf(torch.tensor(rays.pos).float().to(batch['x'].get_device()), min_deg=0, max_deg=15)
-        pose_emb_dir = posenc_nerf(torch.tensor(rays.dir).float().to(batch['x'].get_device()), min_deg=0, max_deg=8)
+        pose_emb_pos = posenc_nerf(torch.tensor(rays.pos).float().to(device), min_deg=0, max_deg=15)
+        pose_emb_dir = posenc_nerf(torch.tensor(rays.dir).float().to(device), min_deg=0, max_deg=8)
         
         pose_emb = torch.concat([pose_emb_pos, pose_emb_dir], dim=-1) # [batch, h, w, 144]
         
@@ -322,18 +322,18 @@ class ConditioningProcessor(torch.nn.Module):
         assert cond_mask.shape == (B,), (cond_mask.shape, B)
         
         cond_mask = cond_mask[:, None, None, None, None]
-        pose_emb = torch.where(cond_mask, pose_emb, torch.zeros_like(pose_emb)) #[B, F, H, W, 144]
+        pose_emb = torch.where(cond_mask, pose_emb, torch.zeros_like(pose_emb)) #[current_batch_size, F, H, W, 144]
         pose_emb = rearrange(pose_emb, "b f h w c -> b f c h w")
         # pose_emb = torch.tensor(pose_emb).float().to(device)
         
         
-        # now [B, 1, C=144, H, W]
+        # checkpoint_path [current_batch_size, 1, C=144, H, W]
         
         if self.use_pos_emb:
             pose_emb += self.pos_emb[None, None]
         if self.use_ref_pose_emb:
             pose_emb = torch.concat([self.first_emb, self.other_emb], axis=1) + pose_emb
-            # now [B, 2, C=144, H, W]
+            # checkpoint_path [current_batch_size, 2, C=144, H, W]
             
             
         pose_embs = []
@@ -531,29 +531,29 @@ class XUNet(torch.nn.Module):
                 
         assert not hs # check hs is empty
                 
-        h = torch.nn.functional.silu(self.lastgn(h)) # [B, F, self.ch, 128, 128]
+        h = torch.nn.functional.silu(self.lastgn(h)) # [current_batch_size, F, self.ch, 128, 128]
         return rearrange(self.lastconv(rearrange(h, 'b f c h w -> (b f) c h w')), '(b f) c h w -> b f c h w', b=B)[:, 1]
                 
 if __name__ == "__main__":
     h,w = 56, 56
     b = 8
-    a = torch.nn.DataParallel(XUNet(H=h, W=w, ch=128)).cuda()
+    a = torch.nn.DataParallel(XUNet(H=h, W=w, ch=128)).to(device)
 
     batch = {
-    'x': torch.zeros(b,3, h, w).cuda(),
-    'z': torch.zeros(b,3, h, w).cuda(),
+    'x': torch.zeros(b,3, h, w).to(device),
+    'z': torch.zeros(b,3, h, w).to(device),
     'logsnr': torch.tensor([10]*(2*b)).reshape(b,2),
     'R': torch.tensor([[[  # Define a rigid rotation
        [-1/3, -(1/3)**.5, (1/3)**.5],
        [1/3, -(1/3)**.5, -(1/3)**.5],
        [-2/3, 0, -(1/3)**.5]],
-    ]]).repeat(b, 2,1,1).cuda(),
-    't': torch.tensor([[[2, 2, 2]]]).repeat(b,2,1).cuda(),
+    ]]).repeat(b, 2,1,1).to(device),
+    't': torch.tensor([[[2, 2, 2]]]).repeat(b,2,1).to(device),
     'K':torch.tensor([[  # Define a rigid rotation
        [1, 0, 0],
        [0, 1, 0],
        [0, 0, 1],
-    ]]).repeat(b,1,1).cuda(),
+    ]]).repeat(b,1,1).to(device),
     }
 
-    print(a(batch, cond_mask=torch.tensor([True]*b).cuda()).shape)
+    print(a(batch, cond_mask=torch.tensor([True]*b).to(device)).shape)
