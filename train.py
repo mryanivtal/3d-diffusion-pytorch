@@ -63,7 +63,6 @@ if WARMUP_STEPS is None:
     WARMUP_STEPS = 10000000/BATCH_SIZE
 
 # IDE Debug settings
-IDE_OVERRIDE = 1            # todo:remove
 if IDE_OVERRIDE == 1:
     DL_WORKERS=0
     ONE_BATCH_PER_EPOCH = 1
