@@ -21,7 +21,7 @@ import os
 # ===== Parse command line arguments =====
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--outdir', type=str, default='./output', help='output folder')
-argparser.add_argument('--datadir', type=str, default='../../datasets/cats', help='dataset folder')
+argparser.add_argument('--datadir', type=str, default='../datasets/srn_cars/cars_train', help='dataset folder')
 argparser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
 # argparser.add_argument('--timesteps', type=int, default=300, help='model number of timesteps (T)')
 argparser.add_argument('--epochs', type=int, default=100, help='number of training epochs')
@@ -75,8 +75,8 @@ print(f'device: {device}')
 image_size = 64
 batch_size = BATCH_SIZE
 
-d = dataset('train', path=Path('../datasets/srn_cars/cars_train'), imgsize=image_size)
-d_val = dataset('val', path='../datasets/srn_cars/cars_train', imgsize=image_size)
+d = dataset('train', path=Path(DATASET_DIR), imgsize=image_size)
+d_val = dataset('val', path=Path(DATASET_DIR), imgsize=image_size)
 
 if ONE_DL_WORKER:
     loader = MultiEpochsDataLoader(d, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=0)
