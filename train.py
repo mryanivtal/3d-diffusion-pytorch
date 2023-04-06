@@ -30,14 +30,14 @@ argparser.add_argument('--batchsize', type=int, default=32, help='train batch si
 argparser.add_argument('--checkpointpath', type=str, default=None, help='start from saved model')
 # argparser.add_argument('--betastart', type=float, default=1e-4, help='diffusion model noise scheduler beta start')
 # argparser.add_argument('--betaend', type=float, default=2e-2, help='diffusion model noise scheduler beta end')
-argparser.add_argument('--checkpointevery', type=int, default=10, help='save checkpoint every N epochs, 0 for disable')
+argparser.add_argument('--checkpointevery', type=int, default=20, help='save checkpoint every N epochs, 0 for disable')
 argparser.add_argument('--inferonly', type=int, default=0, help='0 - train. 1 - Only sample from model, no training')
 argparser.add_argument('--warmupsteps', type=int, default=None, help='amount of steps fpr warmup')
 argparser.add_argument('--dlworkers', type=int, default=2, help='Number of dataloader workers')
 argparser.add_argument('--onebatchperepoch', type=int, default=0, help='For debug purposes')
 argparser.add_argument('--ideoverride', type=int, default=0, help='For debug purposes')
-argparser.add_argument('--reportlossevery', type=int, default=100, help='Report loss every n iterations')
-argparser.add_argument('--evaluateevery', type=int, default=500, help='evaluate model every n iterations')
+argparser.add_argument('--reportlossevery', type=int, default=60, help='Report loss every n batches')
+argparser.add_argument('--evaluateevery', type=int, default=20, help='evaluate model every n epochs')
 
 args = argparser.parse_args()
 ONE_BATCH_PER_EPOCH = args.onebatchperepoch
@@ -127,24 +127,7 @@ for epoch in range(NUM_EPOCHS):
         if step % REPORT_LOSS_EVERY == 0:
             print("Loss:", loss.item())
                 
-        # Evaluate model every 1000 items
-        if (step + 1) % EVALUATE_EVERY == 900:
-            model.eval()
-            with torch.no_grad():
-                for original_img, R, T, K in loader_val:
-                    current_batch_size = original_img.shape[0]
-                    w = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7] * (current_batch_size // 8) + list(range(current_batch_size % 8)))
-                    img = sample(model, img=original_img, R=R, T=T, K=K, w=w)
-                    img = rearrange(((img[-1].clip(-1,1) + 1) * 127.5).astype(np.uint8), "(b a) c h w -> a c h (b w)", a=8, b=16)
-                    gt = rearrange(((original_img[:, 1] + 1) * 127.5).detach().cpu().numpy().astype(np.uint8), "(b a) c h w -> a c h (b w)", a=8, b=16)
-                    cd = rearrange(((original_img[:, 0] + 1) * 127.5).detach().cpu().numpy().astype(np.uint8), "(b a) c h w -> a c h (b w)", a=8, b=16)
-                    fi = np.concatenate([cd, gt, img], axis=2)
-                    for i, ww in enumerate([0, 1, 2, 3, 4, 5, 6, 7]):
-                        writer.add_image(f"train/{ww}", fi[i], step)
-                    break
-            print('image sampled!')
-            writer.flush()
-            model.train()
+
 
         if step == int(WARMUP_STEPS):
             torch.save({'optim':optimizer.state_dict(), 'model':model.state_dict(), 'step':step}, checkpoint_path + f"/after_warmup.pt")
@@ -154,6 +137,30 @@ for epoch in range(NUM_EPOCHS):
         if ONE_BATCH_PER_EPOCH != 0:        # debug parameter: stop after one batch
             break
 
-    if epoch % CHECKPOINT_EVERY == 0:
-        filename = checkpoint_path / Path(r"/latest.pt")
-        torch.save({'optim':optimizer.state_dict(), 'model':model.state_dict(), 'step':step, 'epoch':epoch}, filename)
+    # Evaluate model every N epochs
+    if (epoch + 1) % EVALUATE_EVERY == 0:
+        model.eval()
+        with torch.no_grad():
+            for original_img, R, T, K in loader_val:
+                current_batch_size = original_img.shape[0]
+                w = torch.tensor(
+                    [0, 1, 2, 3, 4, 5, 6, 7] * (current_batch_size // 8) + list(range(current_batch_size % 8)))
+                img = sample(model, img=original_img, R=R, T=T, K=K, w=w)
+                img = rearrange(((img[-1].clip(-1, 1) + 1) * 127.5).astype(np.uint8), "(b a) c h w -> a c h (b w)", a=8,
+                                b=16)
+                gt = rearrange(((original_img[:, 1] + 1) * 127.5).detach().cpu().numpy().astype(np.uint8),
+                               "(b a) c h w -> a c h (b w)", a=8, b=16)
+                cd = rearrange(((original_img[:, 0] + 1) * 127.5).detach().cpu().numpy().astype(np.uint8),
+                               "(b a) c h w -> a c h (b w)", a=8, b=16)
+                fi = np.concatenate([cd, gt, img], axis=2)
+                for i, ww in enumerate([0, 1, 2, 3, 4, 5, 6, 7]):
+                    writer.add_image(f"train/{ww}", fi[i], step)
+                break
+        print('image sampled!')
+        writer.flush()
+        model.train()
+
+    if CHECKPOINT_EVERY is not None:
+        if epoch % CHECKPOINT_EVERY == 0:
+            filename = checkpoint_path / Path(r"/latest.pt")
+            torch.save({'optim':optimizer.state_dict(), 'model':model.state_dict(), 'step':step, 'epoch':epoch}, filename)
