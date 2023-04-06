@@ -25,7 +25,7 @@ argparser.add_argument('--datadir', type=str, default='../datasets/srn_cars/cars
 argparser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
 # argparser.add_argument('--timesteps', type=int, default=300, help='model number of timesteps (T)')
 argparser.add_argument('--epochs', type=int, default=100, help='number of training epochs')
-argparser.add_argument('--batchsize', type=int, default=128, help='train batch size')
+argparser.add_argument('--batchsize', type=int, default=64, help='train batch size')
 # argparser.add_argument('--randomseed', type=int, default=123, help='initial random seed')
 argparser.add_argument('--checkpointpath', type=str, default=None, help='start from saved model')
 # argparser.add_argument('--betastart', type=float, default=1e-4, help='diffusion model noise scheduler beta start')
@@ -33,8 +33,7 @@ argparser.add_argument('--checkpointpath', type=str, default=None, help='start f
 argparser.add_argument('--checkpointevery', type=int, default=10, help='save checkpoint every N epochs, 0 for disable')
 argparser.add_argument('--inferonly', type=int, default=0, help='0 - train. 1 - Only sample from model, no training')
 argparser.add_argument('--warmupsteps', type=int, default=None, help='amount of steps fpr warmup')
-
-argparser.add_argument('--onedlworker', type=int, default=0, help='Use single dataloader worker')
+argparser.add_argument('--dlworkers', type=int, default=2, help='Number of dataloader workers')
 argparser.add_argument('--onebatchperepoch', type=int, default=0, help='For debug purposes')
 argparser.add_argument('--ideoverride', type=int, default=0, help='For debug purposes')
 
@@ -48,7 +47,7 @@ LEARNING_RATE = args.lr
 NUM_EPOCHS = args.epochs
 BATCH_SIZE = args.batchsize
 # RANDOM_SEED = args.randomseed
-ONE_DL_WORKER = args.onedlworker
+DL_WORKERS = args.dlworkers
 # BETA_START = args.betastart
 # BETA_END = args.betaend
 CHECKPOINT_EVERY = args.checkpointevery
@@ -61,7 +60,7 @@ if WARMUP_STEPS is None:
 
 # IDE Debug settings
 if IDE_OVERRIDE == 1:
-    ONE_DL_WORKER = 1
+    DL_WORKERS=0
     ONE_BATCH_PER_EPOCH = 1
     BATCH_SIZE = 2
     CHECKPOINT_EVERY = 1
@@ -78,13 +77,8 @@ batch_size = BATCH_SIZE
 d = dataset('train', path=Path(DATASET_DIR), imgsize=image_size)
 d_val = dataset('val', path=Path(DATASET_DIR), imgsize=image_size)
 
-if ONE_DL_WORKER:
-    loader = MultiEpochsDataLoader(d, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=0)
-    loader_val = DataLoader(d_val, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=0)
-else:
-    loader = MultiEpochsDataLoader(d, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=40)
-    loader_val = DataLoader(d_val, batch_size=128, shuffle=True, drop_last=True, num_workers=16)
-
+loader = MultiEpochsDataLoader(d, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=DL_WORKERS)
+loader_val = DataLoader(d_val, batch_size=128, shuffle=True, drop_last=True, num_workers=DL_WORKERS)
 
 # ===== Model and Optimizer =====
 model = XUNet(H=image_size, W=image_size, ch=128)
