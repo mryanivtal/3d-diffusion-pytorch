@@ -96,9 +96,7 @@ def sample(model, img, R, T, K, w, timesteps=256):
 
 @torch.no_grad()
 def p_sample(model, x, z, R, T, K, logsnr, logsnr_next, w):
-    model_mean, model_variance = p_mean_variance(model, x=x, z=z, R=R, T=T, K=K, logsnr=logsnr, logsnr_next=logsnr_next,
-                                                 w=w)
-
+    model_mean, model_variance = p_mean_variance(model, x=x, z=z, R=R, T=T, K=K, logsnr=logsnr, logsnr_next=logsnr_next, w=w)
     if logsnr_next == 0:
         return model_mean
 
@@ -125,16 +123,11 @@ def p_mean_variance(model, x, z, R, T, K, logsnr, logsnr_next, w=2.0):
     pred_noise = model(batch, cond_mask=torch.tensor([True] * b)).detach().cpu()
     batch['x'] = torch.randn_like(x).to(device)
     pred_noise_unconditioned = model(batch, cond_mask=torch.tensor([False] * b)).detach().cpu()
-
     pred_noise_final = (1 + w) * pred_noise - w * pred_noise_unconditioned
-
     z = z.detach().cpu()
-
     z_start = (z - sigma * pred_noise_final) / alpha
     z_start.clamp_(-1., 1.)
-
     model_mean = alpha_next * (z * (1 - c) / alpha + c * z_start)
-
     posterior_variance = squared_sigma_next * c
 
     return model_mean, posterior_variance

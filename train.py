@@ -63,11 +63,14 @@ if WARMUP_STEPS is None:
     WARMUP_STEPS = 10000000/BATCH_SIZE
 
 # IDE Debug settings
+IDE_OVERRIDE = 1            # todo:remove
 if IDE_OVERRIDE == 1:
     DL_WORKERS=0
     ONE_BATCH_PER_EPOCH = 1
     BATCH_SIZE = 2
     CHECKPOINT_EVERY = 1
+    EVALUATE_EVERY = 1
+    REPORT_LOSS_EVERY = 1
 
 # ===== CPU / GPU selection =====
 # Note - works only on GPU at the moment
@@ -82,7 +85,7 @@ d = dataset('train', path=Path(DATASET_DIR), imgsize=image_size)
 d_val = dataset('val', path=Path(DATASET_DIR), imgsize=image_size)
 
 loader = MultiEpochsDataLoader(d, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=DL_WORKERS)
-loader_val = DataLoader(d_val, batch_size=128, shuffle=True, drop_last=True, num_workers=DL_WORKERS)
+loader_val = DataLoader(d_val, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=DL_WORKERS)
 
 # ===== Model and Optimizer =====
 model = XUNet(H=image_size, W=image_size, ch=128)
@@ -124,7 +127,7 @@ for epoch in range(NUM_EPOCHS):
         writer.add_scalar("train/lr", optimizer.param_groups[0]['lr'], global_step=step)
 
         # Report every N batches
-        if step % REPORT_LOSS_EVERY == 0:
+        if (step + 1) % REPORT_LOSS_EVERY == 0:
             print("Loss:", loss.item())
 
         if step == int(WARMUP_STEPS):
@@ -160,7 +163,7 @@ for epoch in range(NUM_EPOCHS):
         model.train()
 
     if CHECKPOINT_EVERY is not None:
-        if epoch % CHECKPOINT_EVERY == 0:
+        if (epoch + 1) % CHECKPOINT_EVERY == 0:
             filename = checkpoint_path / Path(r"/latest.pt")
             print(f'Saving checkpoint to {filename}')
             torch.save({'optim':optimizer.state_dict(), 'model':model.state_dict(), 'step':step, 'epoch':epoch}, filename)
