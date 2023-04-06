@@ -25,7 +25,7 @@ argparser.add_argument('--datadir', type=str, default='../datasets/srn_cars/cars
 argparser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
 # argparser.add_argument('--timesteps', type=int, default=300, help='model number of timesteps (T)')
 argparser.add_argument('--epochs', type=int, default=100, help='number of training epochs')
-argparser.add_argument('--batchsize', type=int, default=64, help='train batch size')
+argparser.add_argument('--batchsize', type=int, default=32, help='train batch size')
 # argparser.add_argument('--randomseed', type=int, default=123, help='initial random seed')
 argparser.add_argument('--checkpointpath', type=str, default=None, help='start from saved model')
 # argparser.add_argument('--betastart', type=float, default=1e-4, help='diffusion model noise scheduler beta start')
@@ -36,6 +36,8 @@ argparser.add_argument('--warmupsteps', type=int, default=None, help='amount of 
 argparser.add_argument('--dlworkers', type=int, default=2, help='Number of dataloader workers')
 argparser.add_argument('--onebatchperepoch', type=int, default=0, help='For debug purposes')
 argparser.add_argument('--ideoverride', type=int, default=0, help='For debug purposes')
+argparser.add_argument('--reportlossevery', type=int, default=100, help='Report loss every n iterations')
+argparser.add_argument('--evaluateevery', type=int, default=500, help='evaluate model every n iterations')
 
 args = argparser.parse_args()
 ONE_BATCH_PER_EPOCH = args.onebatchperepoch
@@ -53,6 +55,8 @@ DL_WORKERS = args.dlworkers
 CHECKPOINT_EVERY = args.checkpointevery
 INFER_ONLY = args.inferonly
 WARMUP_STEPS = args.warmupsteps
+REPORT_LOSS_EVERY = args.reportlossevery
+EVALUATE_EVERY = args.evaluateevery
 IDE_OVERRIDE = args.ideoverride
 
 if WARMUP_STEPS is None:
@@ -119,13 +123,12 @@ for epoch in range(NUM_EPOCHS):
         writer.add_scalar("train/loss", loss.item(), global_step=step)
         writer.add_scalar("train/lr", optimizer.param_groups[0]['lr'], global_step=step)
 
-        # Report every 500 batches
-        if step % 500 == 0:
+        # Report every N batches
+        if step % REPORT_LOSS_EVERY == 0:
             print("Loss:", loss.item())
                 
         # Evaluate model every 1000 items
-        # if step % 1000 == 900:
-        if True:               # todo: change back to as above
+        if (step + 1) % EVALUATE_EVERY == 900:
             model.eval()
             with torch.no_grad():
                 for original_img, R, T, K in loader_val:
