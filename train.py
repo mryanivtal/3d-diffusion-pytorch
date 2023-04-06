@@ -31,12 +31,12 @@ argparser.add_argument('--checkpointpath', type=str, default=None, help='start f
 # argparser.add_argument('--betastart', type=float, default=1e-4, help='diffusion model noise scheduler beta start')
 # argparser.add_argument('--betaend', type=float, default=2e-2, help='diffusion model noise scheduler beta end')
 argparser.add_argument('--checkpointevery', type=int, default=20, help='save checkpoint every N epochs, 0 for disable')
-argparser.add_argument('--inferonly', type=int, default=0, help='0 - train. 1 - Only sample from model, no training')
+# argparser.add_argument('--inferonly', type=int, default=0, help='0 - train. 1 - Only sample from model, no training')
 argparser.add_argument('--warmupsteps', type=int, default=None, help='amount of steps fpr warmup')
 argparser.add_argument('--dlworkers', type=int, default=2, help='Number of dataloader workers')
 argparser.add_argument('--onebatchperepoch', type=int, default=0, help='For debug purposes')
 argparser.add_argument('--ideoverride', type=int, default=0, help='For debug purposes')
-argparser.add_argument('--reportlossevery', type=int, default=60, help='Report loss every n batches')
+argparser.add_argument('--reportlossevery', type=int, default=10, help='Report loss every n batches')
 argparser.add_argument('--evaluateevery', type=int, default=20, help='evaluate model every n epochs')
 
 args = argparser.parse_args()
@@ -126,8 +126,6 @@ for epoch in range(NUM_EPOCHS):
         # Report every N batches
         if step % REPORT_LOSS_EVERY == 0:
             print("Loss:", loss.item())
-                
-
 
         if step == int(WARMUP_STEPS):
             torch.save({'optim':optimizer.state_dict(), 'model':model.state_dict(), 'step':step}, checkpoint_path + f"/after_warmup.pt")
@@ -139,6 +137,7 @@ for epoch in range(NUM_EPOCHS):
 
     # Evaluate model every N epochs
     if (epoch + 1) % EVALUATE_EVERY == 0:
+        print('Evaluating model...')
         model.eval()
         with torch.no_grad():
             for original_img, R, T, K in loader_val:
@@ -163,4 +162,5 @@ for epoch in range(NUM_EPOCHS):
     if CHECKPOINT_EVERY is not None:
         if epoch % CHECKPOINT_EVERY == 0:
             filename = checkpoint_path / Path(r"/latest.pt")
+            print(f'Saving checkpoint to {filename}')
             torch.save({'optim':optimizer.state_dict(), 'model':model.state_dict(), 'step':step, 'epoch':epoch}, filename)
