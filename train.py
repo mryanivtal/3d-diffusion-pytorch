@@ -108,14 +108,6 @@ else:
     writer = SummaryWriter(checkpoint_path)
     step = ckpt['step']
 
-# todo: remove ==
-if CHECKPOINT_EVERY is not None:
-    filename = checkpoint_path / Path('latest.pt')
-    print(f'Saving checkpoint to {filename}')
-    torch.save({'optim':optimizer.state_dict(), 'model':model.state_dict(), 'step':step, 'epoch':9999}, filename)
-# todo: remove above
-
-
 
 # ===== Train loop - Epoch =====
 for epoch in range(NUM_EPOCHS):
