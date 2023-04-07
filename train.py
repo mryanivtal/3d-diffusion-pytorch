@@ -1,5 +1,5 @@
 import argparse
-from functions import logsnr_schedule_cosine, p_losses, warmup, sample
+from functions import logsnr_schedule_cosine, p_losses, warmup, sample, evaluate_model
 from xunet import XUNet
 
 import torch
@@ -96,9 +96,8 @@ optimizer = Adam(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.99))
 if CHECKPOINT_DIR is None:
     checkpoint_path = Path(OUTPUT_DIR) / Path(str(int(time.time())))
     writer = SummaryWriter(checkpoint_path)
-    print(f'Checkpoints path: {checkpoint_path}')
-
     step = 0
+    print(f'Checkpoints path: {checkpoint_path}')
 else:
     checkpoint_path = Path(CHECKPOINT_DIR)
     print('Loading model checkpoint from: ', checkpoint_path)
@@ -143,28 +142,8 @@ for epoch in range(NUM_EPOCHS):
 
     # Evaluate model every N epochs
     if (epoch + 1) % EVALUATE_EVERY == 0:
-        print('Evaluating model...')
-        model.eval()
-        with torch.no_grad():
-            for original_img, R, T, K in loader_val:
-                current_batch_size = original_img.shape[0]
-                w = torch.tensor(
-                    [0, 1, 2, 3, 4, 5, 6, 7] * (current_batch_size // 8) + list(range(current_batch_size % 8)))
-                image_samples = sample(model, img=original_img, R=R, T=T, K=K, w=w)
-
-                # todo: need to fix the below - currently hard coded to batch_size=128. currently will update the batch size back to 128
-                image_samples = rearrange(((image_samples[-1].clip(-1, 1) + 1) * 127.5).astype(np.uint8), "(b a) c h w -> a c h (b w)", a=8, b=16)
-                gt = rearrange(((original_img[:, 1] + 1) * 127.5).detach().cpu().numpy().astype(np.uint8),
-                               "(b a) c h w -> a c h (b w)", a=8, b=16)
-                cd = rearrange(((original_img[:, 0] + 1) * 127.5).detach().cpu().numpy().astype(np.uint8),
-                               "(b a) c h w -> a c h (b w)", a=8, b=16)
-                fi = np.concatenate([cd, gt, image_samples], axis=2)
-                for i, ww in enumerate([0, 1, 2, 3, 4, 5, 6, 7]):
-                    writer.add_image(f"train/{ww}", fi[i], step)
-                break
-        print('image sampled!')
-        writer.flush()
-        model.train()
+        # todo: model evaluations not saved most of the times!
+        evaluate_model(loader_val, model, writer, step)
 
     if CHECKPOINT_EVERY is not None:
         if (epoch + 1) % CHECKPOINT_EVERY == 0:

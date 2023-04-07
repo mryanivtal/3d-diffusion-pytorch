@@ -139,3 +139,29 @@ def warmup(optimizer, step, last_step, last_lr):
 
     else:
         optimizer.param_groups[0]['lr'] = last_lr
+
+
+def evaluate_model(loader_val: DataLoader, model, tb_writer, step: int):
+    print('Evaluating model...')
+    model.eval()
+    with torch.no_grad():
+        for original_img, R, T, K in loader_val:
+            current_batch_size = original_img.shape[0]
+            w = torch.tensor(
+                [0, 1, 2, 3, 4, 5, 6, 7] * (current_batch_size // 8) + list(range(current_batch_size % 8)))
+            image_samples = sample(model, img=original_img, R=R, T=T, K=K, w=w)
+
+            # todo: need to fix the below - currently hard coded to batch_size=128. currently will update the batch size back to 128
+            image_samples = rearrange(((image_samples[-1].clip(-1, 1) + 1) * 127.5).astype(np.uint8),
+                                      "(b a) c h w -> a c h (b w)", a=8, b=16)
+            gt = rearrange(((original_img[:, 1] + 1) * 127.5).detach().cpu().numpy().astype(np.uint8),
+                           "(b a) c h w -> a c h (b w)", a=8, b=16)
+            cd = rearrange(((original_img[:, 0] + 1) * 127.5).detach().cpu().numpy().astype(np.uint8),
+                           "(b a) c h w -> a c h (b w)", a=8, b=16)
+            fi = np.concatenate([cd, gt, image_samples], axis=2)
+            for i, ww in enumerate([0, 1, 2, 3, 4, 5, 6, 7]):
+                tb_writer.add_image(f"train/{ww}", fi[i], step)
+            break
+    print('image sampled!')
+    tb_writer.flush()
+    model.train()
