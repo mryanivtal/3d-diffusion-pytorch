@@ -95,12 +95,13 @@ optimizer = Adam(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.99))
 # ===== Load Model and Optimizer from checkpoint =====
 if CHECKPOINT_DIR is None:
     checkpoint_path = Path(OUTPUT_DIR) / Path(str(int(time.time())))
+    print(f'Checkpoints path: {checkpoint_path}')
     writer = SummaryWriter(checkpoint_path)
     step = 0
 else:
-    checkpoint_path = CHECKPOINT_DIR
+    checkpoint_path = Path(CHECKPOINT_DIR)
     print('Loading model checkpoint from: ', checkpoint_path)
-    ckpt = torch.load(os.path.join(checkpoint_path, 'latest.pt'))
+    ckpt = torch.load(checkpoint_path / Path('latest.pt'))
     model.load_state_dict(ckpt['model'])
     optimizer.load_state_dict(ckpt['optim'])
     writer = SummaryWriter(checkpoint_path)
@@ -130,7 +131,7 @@ for epoch in range(NUM_EPOCHS):
 
         if step == int(WARMUP_STEPS):
             filename = checkpoint_path / Path('after_warmup.pt')
-            print(f'Saving checkpoint after warmup to: {filename.absolute()}')
+            print(f'Saving checkpoint after warmup to: {filename}')
             torch.save({'optim':optimizer.state_dict(), 'model':model.state_dict(), 'step':step}, filename)
         
         step += 1
@@ -165,6 +166,6 @@ for epoch in range(NUM_EPOCHS):
 
     if CHECKPOINT_EVERY is not None:
         if (epoch + 1) % CHECKPOINT_EVERY == 0:
-            filename = checkpoint_path / Path(r"/latest.pt")
-            print(f'Saving checkpoint to {filename.absolute()}')
+            filename = checkpoint_path / Path('latest.pt')
+            print(f'Saving checkpoint to {filename}')
             torch.save({'optim':optimizer.state_dict(), 'model':model.state_dict(), 'step':step, 'epoch':epoch}, filename)
