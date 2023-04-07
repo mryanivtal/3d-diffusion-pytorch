@@ -95,8 +95,9 @@ optimizer = Adam(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.99))
 # ===== Load Model and Optimizer from checkpoint =====
 if CHECKPOINT_DIR is None:
     checkpoint_path = Path(OUTPUT_DIR) / Path(str(int(time.time())))
-    print(f'Checkpoints path: {checkpoint_path}')
     writer = SummaryWriter(checkpoint_path)
+    print(f'Checkpoints path: {checkpoint_path}')
+
     step = 0
 else:
     checkpoint_path = Path(CHECKPOINT_DIR)
