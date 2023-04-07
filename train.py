@@ -27,7 +27,7 @@ argparser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
 argparser.add_argument('--epochs', type=int, default=100, help='number of training epochs')
 argparser.add_argument('--batchsize', type=int, default=32, help='train batch size')
 # argparser.add_argument('--randomseed', type=int, default=123, help='initial random seed')
-argparser.add_argument('--checkpointpath', type=str, default=None, help='start from saved model')
+argparser.add_argument('--checkpointdir', type=str, default=None, help='start from saved model')
 # argparser.add_argument('--betastart', type=float, default=1e-4, help='diffusion model noise scheduler beta start')
 # argparser.add_argument('--betaend', type=float, default=2e-2, help='diffusion model noise scheduler beta end')
 argparser.add_argument('--checkpointevery', type=int, default=20, help='save checkpoint every N epochs, 0 for disable')
@@ -41,7 +41,7 @@ argparser.add_argument('--evaluateevery', type=int, default=20, help='evaluate m
 
 args = argparser.parse_args()
 ONE_BATCH_PER_EPOCH = args.onebatchperepoch
-CHECKPOINT_PATH = args.checkpointpath
+CHECKPOINT_DIR = args.checkpointdir
 OUTPUT_DIR = args.outdir
 DATASET_DIR = args.datadir
 # TIMESTEPS = args.timesteps
@@ -93,13 +93,12 @@ model.to(device)
 optimizer = Adam(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.99))
 
 # ===== Load Model and Optimizer from checkpoint =====
-if CHECKPOINT_PATH is None:
+if CHECKPOINT_DIR is None:
     checkpoint_path = Path(OUTPUT_DIR) / Path(str(int(time.time())))
     writer = SummaryWriter(checkpoint_path)
     step = 0
-
 else:
-    checkpoint_path = CHECKPOINT_PATH
+    checkpoint_path = CHECKPOINT_DIR
     print('Loading model checkpoint from: ', checkpoint_path)
     ckpt = torch.load(os.path.join(checkpoint_path, 'latest.pt'))
     model.load_state_dict(ckpt['model'])
@@ -130,7 +129,9 @@ for epoch in range(NUM_EPOCHS):
             print("Loss:", loss.item())
 
         if step == int(WARMUP_STEPS):
-            torch.save({'optim':optimizer.state_dict(), 'model':model.state_dict(), 'step':step}, checkpoint_path + f"/after_warmup.pt")
+            filename = checkpoint_path / Path('after_warmup.pt')
+            print(f'Saving checkpoint after warmup to: {filename.absolute()}')
+            torch.save({'optim':optimizer.state_dict(), 'model':model.state_dict(), 'step':step}, filename)
         
         step += 1
 
@@ -165,5 +166,5 @@ for epoch in range(NUM_EPOCHS):
     if CHECKPOINT_EVERY is not None:
         if (epoch + 1) % CHECKPOINT_EVERY == 0:
             filename = checkpoint_path / Path(r"/latest.pt")
-            print(f'Saving checkpoint to {filename}')
+            print(f'Saving checkpoint to {filename.absolute()}')
             torch.save({'optim':optimizer.state_dict(), 'model':model.state_dict(), 'step':step, 'epoch':epoch}, filename)
