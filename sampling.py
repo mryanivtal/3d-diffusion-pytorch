@@ -1,15 +1,9 @@
+from functions import logsnr_schedule_cosine, p_mean_variance
 from xunet import XUNet
 
 import torch
 import numpy as np
-import torch.nn.functional as F
-
 from tqdm import tqdm
-from einops import rearrange
-import time
-
-from SRNdataset import dataset, MultiEpochsDataLoader
-from tensorboardX import SummaryWriter
 import os
 import glob
 from PIL import Image
@@ -20,8 +14,8 @@ import argparse
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--model',type=str, default="./trained_model.pt")
-parser.add_argument('--target',type=str, default="./data/SRN/cars_train/a4d535e1b1d3c153ff23af07d9064736")
+parser.add_argument('--model',type=str, default="./results/latest.pt")
+parser.add_argument('--target',type=str, default="../datasets/srn_cars/cars_train/a4d535e1b1d3c153ff23af07d9064736")
 args = parser.parse_args()
 
 
@@ -49,17 +43,11 @@ data_K = torch.tensor(data_K)
 
 model = XUNet(H=imgsize, W=imgsize, ch=128)
 model = torch.nn.DataParallel(model)
-model.to('cuda')
+model.to(device)
 
 ckpt = torch.load(args.model)
 model.load_state_dict(ckpt['model'])
 
-
-def logsnr_schedule_cosine(t, *, logsnr_min=-20., logsnr_max=20.):
-    b = np.arctan(np.exp(-.5 * logsnr_max))
-    a = np.arctan(np.exp(-.5 * logsnr_min)) - b
-    
-    return -2. * torch.log(torch.tan(a * t + b))
 
 def xt2batch(x, logsnr, z, R, T, K):
     b = x.shape[0]
@@ -72,37 +60,6 @@ def xt2batch(x, logsnr, z, R, T, K):
         't': T.to(device),
         'K':K[None].repeat(b,1,1).to(device),
     }
-
-@torch.no_grad()
-def p_mean_variance(model, x, z, R, T, K, logsnr, logsnr_next, w):
-    w = w[:, None, None, None]
-    b = w.shape[0]
-    c = - torch.special.expm1(logsnr - logsnr_next)
-    
-
-    squared_alpha, squared_alpha_next = logsnr.sigmoid(), logsnr_next.sigmoid()
-    squared_sigma, squared_sigma_next = (-logsnr).sigmoid(), (-logsnr_next).sigmoid()
-    
-    alpha, sigma, alpha_next = map(lambda x: x.sqrt(), (squared_alpha, squared_sigma, squared_alpha_next))
-    
-    # batch = xt2batch(x, logsnr.repeat(b), z, R)
-    batch = xt2batch(x, logsnr.repeat(b), z, R, T, K)
-    pred_noise = model(batch, cond_mask= torch.tensor([True]*b)).detach().cpu()
-    batch['x'] = torch.randn_like(x).to(device)
-    pred_noise_unconditioned = model(batch, cond_mask= torch.tensor([False]*b)).detach().cpu()
-    
-    pred_noise_final = (1+w) * pred_noise - w * pred_noise_unconditioned
-    
-    z = z.detach().cpu()
-    
-    z_start = (z - sigma * pred_noise_final) / alpha
-    z_start.clamp_(-1., 1.)
-    
-    model_mean = alpha_next * (z * (1 - c) / alpha + c * z_start)
-    
-    posterior_variance = squared_sigma_next * c
-    
-    return model_mean, posterior_variance
 
 
 @torch.no_grad()
