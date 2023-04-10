@@ -15,19 +15,18 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # === Parse arguments ===
 parser = argparse.ArgumentParser()
 parser.add_argument('--model', type=str, default="./latest.pt")
-parser.add_argument('--imagesdir', type=str, default="../datasets/srn_cars/cars_train/a4d535e1b1d3c153ff23af07d9064736")
+parser.add_argument('--refimagedir', type=str, default="../datasets/srn_cars/cars_train/a4d535e1b1d3c153ff23af07d9064736")
 parser.add_argument('--outdir', type=str, default="./samples")
 
 args = parser.parse_args()
 OUTPUT_DIR = args.outdir
 TRAINED_MODEL = args.model
-IMAGES_FOLDER = args.images_folder
-
+REF_IMAGE_DIR = args.refimagedir
 
 # === Folders etc. ====
 Path(OUTPUT_DIR).mkdir(exist_ok=True, parents=True)
 assert Path(OUTPUT_DIR).exists(), f'Output path {OUTPUT_DIR} does not exist'
-assert Path(IMAGES_FOLDER).exists(), f'Reference Data path {IMAGES_FOLDER} does not exist'
+assert Path(REF_IMAGE_DIR).exists(), f'Reference Data path {REF_IMAGE_DIR} does not exist'
 assert Path(TRAINED_MODEL).exists(), f'Model path {TRAINED_MODEL} does not exist'
 
 
@@ -37,18 +36,18 @@ data_imgs = []
 data_Rs = []
 data_Ts = []
 
-for img_filename in sorted(glob.glob(IMAGES_FOLDER + "/rgb/*.png")):
+for img_filename in sorted(glob.glob(REF_IMAGE_DIR + "/rgb/*.png")):
     img = Image.open(img_filename)
     img = img.resize((imgsize, imgsize))
     img = np.array(img) / 255 * 2 - 1
     img = img.transpose(2, 0, 1)[:3].astype(np.float32)
     data_imgs.append(img)
-    pose_filename = os.path.join(IMAGES_FOLDER, 'pose', os.path.basename(img_filename)[:-4] + ".txt")
+    pose_filename = os.path.join(REF_IMAGE_DIR, 'pose', os.path.basename(img_filename)[:-4] + ".txt")
     pose = np.array(open(pose_filename).read().strip().split()).astype(float).reshape((4, 4))
     data_Rs.append(pose[:3, :3])
     data_Ts.append(pose[:3, 3])
 
-data_K = np.array(open(os.path.join(IMAGES_FOLDER, 'intrinsics', os.path.basename(img_filename)[:-4] + ".txt")).read().strip().split()).astype(float).reshape((3, 3))
+data_K = np.array(open(os.path.join(REF_IMAGE_DIR, 'intrinsics', os.path.basename(img_filename)[:-4] + ".txt")).read().strip().split()).astype(float).reshape((3, 3))
 data_K = torch.tensor(data_K)
 
 
