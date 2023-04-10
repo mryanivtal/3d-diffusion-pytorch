@@ -57,8 +57,8 @@ model = torch.nn.DataParallel(model)
 model.to(device)
 
 # todo: uncomment below to load checkpoint
-# ckpt = torch.load(args.model)
-# model.load_state_dict(ckpt['model'])
+ckpt = torch.load(args.model)
+model.load_state_dict(ckpt['model'])
 
 
 # === Create the list of available reference views of the 3d element,start with a single given one (initial reference) ===
