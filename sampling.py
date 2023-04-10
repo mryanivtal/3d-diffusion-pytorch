@@ -84,7 +84,7 @@ with torch.no_grad():
         img = sample(model, record=record, target_R=R, target_T=T, K=data_K, w=w)
         record.append([img, R.cpu().numpy(), T.cpu().numpy()])
 
-        sample_path = Path(OUTPUT_DIR) / Path('step')
+        sample_path = Path(OUTPUT_DIR) / Path(f'step_{step}')
         sample_path.mkdir(exist_ok=True)
         Image.fromarray(((gt.transpose(1, 2, 0) + 1) * 127.5).astype(np.uint8)).save(sample_path / Path('gt.png'))
         for i in w:
