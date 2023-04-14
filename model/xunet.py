@@ -55,7 +55,7 @@ class XUNet(torch.nn.Module):
         self.dim_in = [self.ch] + (self.ch * np.array(self.ch_mult)[:-1]).tolist()
         self.dim_out = (self.ch * np.array(self.ch_mult)).tolist()
 
-        # upsampling
+        # Downsampling
         self.xunetblocks = torch.nn.ModuleList([])
         for i_level in range(self.num_resolutions):
             single_level = torch.nn.ModuleList([])
@@ -73,6 +73,8 @@ class XUNet(torch.nn.Module):
                 )
                 
             if i_level != self.num_resolutions - 1:
+                # todo: the above looks lik a bug.
+                #  based on the image in the paper - downsampling layer 3 should have a residual block as well.
                 single_level.append(ResnetBlock(in_features=self.dim_out[i_level], 
                                                 out_features=self.dim_out[i_level], 
                                                 dropout=self.dropout, 
@@ -146,7 +148,6 @@ class XUNet(torch.nn.Module):
         h = torch.stack([batch['x'], batch['z']], dim=1)
         h = self.conv(rearrange(h, 'b f c h w -> (b f) c h w'))
         h = rearrange(h, '(b f) c h w -> b f c h w', b=B, f=2)
-
 
         # downsampling
         hs = [h]

@@ -14,7 +14,7 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # === Parse arguments ===
 parser = argparse.ArgumentParser()
-parser.add_argument('--model', type=str, default="./latest.pt")
+parser.add_argument('--model', type=str, default=None)
 parser.add_argument('--refimagedir', type=str, default="../datasets/srn_cars/cars_train/a4d535e1b1d3c153ff23af07d9064736")
 parser.add_argument('--outdir', type=str, default="./samples")
 
@@ -27,7 +27,8 @@ REF_IMAGE_DIR = args.refimagedir
 Path(OUTPUT_DIR).mkdir(exist_ok=True, parents=True)
 assert Path(OUTPUT_DIR).exists(), f'Output path {OUTPUT_DIR} does not exist'
 assert Path(REF_IMAGE_DIR).exists(), f'Reference Data path {REF_IMAGE_DIR} does not exist'
-assert Path(TRAINED_MODEL).exists(), f'Model path {TRAINED_MODEL} does not exist'
+if TRAINED_MODEL is not None:
+    assert Path(TRAINED_MODEL).exists(), f'Model path {TRAINED_MODEL} does not exist'
 
 
 # === Prep data ===
@@ -56,14 +57,19 @@ model = XUNet(H=imgsize, W=imgsize, ch=128)
 model = torch.nn.DataParallel(model)
 model.to(device)
 
-# todo: uncomment below to load checkpoint
-ckpt = torch.load(args.model)
-model.load_state_dict(ckpt['model'])
+if TRAINED_MODEL is not None:
+    print(f'Loading model: {TRAINED_MODEL}...')
+    ckpt = torch.load(TRAINED_MODEL)
+    model.load_state_dict(ckpt['model'])
+else:
+    print('***PLEASE NOTE*** - working with untrained model, please expect gaussian noise as input!')
 
 
 # === Create the list of available reference views of the 3d element,start with a single given one (initial reference) ===
 w = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7])
 b = w.shape[0]
+
+# record - a list containing: one real dataset image duplicated 8 times as batch tensor, the image rotation, the image camera position.
 record = [[data_imgs[0][None].repeat(b, axis=0),
            data_Rs[0],
            data_Ts[0]]]
