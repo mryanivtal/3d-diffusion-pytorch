@@ -15,36 +15,30 @@ Visit [SRN repository](https://github.com/vsitzmann/scene-representation-network
 We include pickle file that contains available view-png files per object. 
 
 ## Training:
+To get help:
+```
+python train.py --help
+```
+
+To train from scratch:
+```
+python train.py --datadir="<your-data-dir>" --outdir="<your-output-dir>" --batchsize=32 --reportlossevery=32 --evaluateevery=20 --checkpointevery=10 --epochs=50
+```
+
+To continue training from checkpoint:
 
 ```
-python train.py
-```
-
-To continue training, 
-
-```
-python train.py --transfer ./results/shapenet_SRN_car/1235678
+python train.py --datadir="<your-data-dir>" --checkpointdir="<path-of-stored-checkpoint>" --batchsize=32 --reportlossevery=32 --evaluateevery=20 --checkpointevery=10 --epochs=50
 ```
 
 ## Sampling:
 
 ```
-python sample.py --model trained_model.pt --target ./data/SRN/cars_train/a4d535e1b1d3c153ff23af07d9064736
+python sample.py --model="<path-to-model>" --refimagedir="<your-data-dir>/a4d535e1b1d3c153ff23af07d9064736" --outdir=",output-path-for-samples>"
 ```
 
 We set the diffusion steps to be 256 during sampling procedure, which takes around 10 minutes per view. 
 
-## Pre-trained Model Weights:
-
-[Google Drive](https://drive.google.com/file/d/1GarX4DA2FNPHeAUbzSkV1RuJC0Ci-SE5/view?usp=sharing)
-
-We trained SRN Car dataset for 101K steps for 120 hours. We have tested using 8 x RTX3090 with batch size of 128 and image size of 64 x 64. Due to the memory constraints, we were not able to test the original authors' configuration of image size 128 x 128.
-
-
-## TODO:
-1. ~~Add trained model~~
-2. Add evaluation code.
-3. Get similar performance as reported.
-
 ## Missing:
 1. EMA decay not implemented.
+2. This is still a work in progress, generally works

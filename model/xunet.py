@@ -80,7 +80,6 @@ class XUNet(torch.nn.Module):
             self.xunetblocks.append(single_level)
             
         #middle
-        
         self.middle = XUNetBlock(
             in_channels = self.dim_out[-1],
             features=self.dim_out[-1],
@@ -139,13 +138,16 @@ class XUNet(torch.nn.Module):
         assert B == cond_mask.shape[0]
         assert (H, W) == (self.H, self.W), ((H, W), (self.H, self.W))
 
+        # Conditional processor = create time and pose embedding
         logsnr_emb, pose_embs = self.conditioningprocessor(batch, cond_mask)
         del cond_mask
 
+        # initial convolution - 2 FC layers
         h = torch.stack([batch['x'], batch['z']], dim=1)
         h = self.conv(rearrange(h, 'b f c h w -> (b f) c h w'))
         h = rearrange(h, '(b f) c h w -> b f c h w', b=B, f=2)
-        
+
+
         # downsampling
         hs = [h]
         for i_level in range(self.num_resolutions):
