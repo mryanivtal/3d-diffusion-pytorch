@@ -1,5 +1,5 @@
 from sampling_functions import sample
-from xunet import XUNet
+from model.xunet import XUNet
 import torch
 import numpy as np
 from tqdm import tqdm

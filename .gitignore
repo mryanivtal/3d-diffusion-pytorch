@@ -132,3 +132,6 @@ dmypy.json
 *.pt
 data/SRN
 sampling
+output/
+results/
+

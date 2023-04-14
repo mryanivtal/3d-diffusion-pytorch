@@ -1,22 +1,17 @@
 import argparse
-from functions import logsnr_schedule_cosine, p_losses, warmup, sample, evaluate_model
-from xunet import XUNet
+from functions import logsnr_schedule_cosine, p_losses, warmup, evaluate_model
+from model.xunet import XUNet
 
 import torch
 from torch.utils.data import DataLoader
 from torch.optim import Adam
-import numpy as np
-import torch.nn.functional as F
 
 from tqdm import tqdm
-from einops import rearrange
 import time
 from pathlib import Path
 
 from SRNdataset import dataset, MultiEpochsDataLoader
 from tensorboardX import SummaryWriter
-import os
-
 
 # ===== Parse command line arguments =====
 argparser = argparse.ArgumentParser()
@@ -63,10 +58,12 @@ if WARMUP_STEPS is None:
     WARMUP_STEPS = 10000000/BATCH_SIZE
 
 # IDE Debug settings
+IDE_OVERRIDE = 1            # todo: remove
+
 if IDE_OVERRIDE == 1:
     DL_WORKERS=0
     ONE_BATCH_PER_EPOCH = 1
-    BATCH_SIZE = 2
+    BATCH_SIZE = 5
     CHECKPOINT_EVERY = 1
     EVALUATE_EVERY = 1
     REPORT_LOSS_EVERY = 1

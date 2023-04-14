@@ -1,33 +1,27 @@
-from xunet import XUNet
-
 import torch
 from torch.utils.data import DataLoader
-from torch.optim import Adam
 import numpy as np
 import torch.nn.functional as F
 
 from tqdm import tqdm
 from einops import rearrange
 import time
-from pathlib import Path
-
-from SRNdataset import dataset, MultiEpochsDataLoader
-from tensorboardX import SummaryWriter
-import os
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 def logsnr_schedule_cosine(t, *, logsnr_min=-20., logsnr_max=20.):
+    """
+    Gets a tensor t of numbers in [0, 1] (one scalar per sample in the batch)
+    returns their cosine logsnr tensor of same size, scalars in [-1, 20]
+    """
     b = np.arctan(np.exp(-.5 * logsnr_max))
     a = np.arctan(np.exp(-.5 * logsnr_min)) - b
 
     return -2. * torch.log(torch.tan(a * t + b))
 
 
-def xt2batch(x, logsnr, z, R, T, K):
-    b = x.shape[0]
-
+def wrap_batch_in_dict(x, logsnr, z, R, T, K):
     return {
         'x': x.to(device),
         'z': z.to(device),
@@ -39,8 +33,13 @@ def xt2batch(x, logsnr, z, R, T, K):
 
 
 def q_sample(z, logsnr, noise):
-    # lambdas = logsnr_schedule_cosine(t)
-
+    """
+    Add noise to z based on logsnr
+    @param z: Tensor [batch, channels, h, w] - images
+    @param logsnr: Tensor [batch, ] - scalars representing logsnr values, one per sample
+    @param noise: random noise
+    @return: Tensor [batch, channels, h, w] - noise-added images
+    """
     alpha = logsnr.sigmoid().sqrt()
     sigma = (-logsnr).sigmoid().sqrt()
 
@@ -51,19 +50,34 @@ def q_sample(z, logsnr, noise):
 
 
 def p_losses(denoise_model, img, R, T, K, logsnr, noise=None, loss_type="l2", cond_prob=0.1):
-    B = img.shape[0]
+    """
+
+    @param denoise_model: torch model
+    @param img:Tensor of dims [Batch, 2, channels, H, W], where img[:, 0] = x (ref image), img[:, 1] = z (current image in generation)
+    @param R: Camera rotations, Tensor of [Batch, 2, 3, 3] where R[:, 0] = x rotation, R[:, 1] = z rotation
+    @param T: Camera positions, Tensor of [Batch, 2, 3] where T[:, 0] = x position, R[:, 1] = z position
+    @param K: Camera intrinsics, Tensor of [Batch, 3, 3] - shared by all samples in batch
+    @param logsnr: logsnr (reflects noise schedule for current diffusion step)
+    @param noise: normal / other noise
+    @param loss_type: l1, l2 etc
+    @param cond_prob: ratio of number of images in the batch to replace by gaussian noise
+    @return:
+    """
+    batch_size = img.shape[0]
     x = img[:, 0]
     z = img[:, 1]
     if noise is None:
         noise = torch.randn_like(x)
 
+    # add noise to z images
     z_noisy = q_sample(z=z, logsnr=logsnr, noise=noise)
 
-    cond_mask = (torch.rand((B,)) > cond_prob).to(device)
-
+    # replace some images with random noise based on ratio
+    cond_mask = (torch.rand((batch_size,)) > cond_prob).to(device)
     x_condition = torch.where(cond_mask[:, None, None, None], x, torch.randn_like(x))
 
-    batch = xt2batch(x=x_condition, logsnr=logsnr, z=z_noisy, R=R, T=T, K=K)
+    # wrap in dictinary, also adds logsnr=0 values to ref images (x)
+    batch = wrap_batch_in_dict(x=x_condition, logsnr=logsnr, z=z_noisy, R=R, T=T, K=K)
 
     predicted_noise = denoise_model(batch, cond_mask=cond_mask.to(device))
 
@@ -108,16 +122,11 @@ def p_mean_variance(model, x, z, R, T, K, logsnr, logsnr_next, w=2.0):
     strt = time.time()
     b = x.shape[0]
     w = w[:, None, None, None]
-
     c = - torch.special.expm1(logsnr - logsnr_next)
-
     squared_alpha, squared_alpha_next = logsnr.sigmoid(), logsnr_next.sigmoid()
     squared_sigma, squared_sigma_next = (-logsnr).sigmoid(), (-logsnr_next).sigmoid()
-
     alpha, sigma, alpha_next = map(lambda x: x.sqrt(), (squared_alpha, squared_sigma, squared_alpha_next))
-
-    # batch = xt2batch(x, logsnr.repeat(b), z, R)
-    batch = xt2batch(x, logsnr.repeat(b), z, R, T, K)
+    batch = wrap_batch_in_dict(x, logsnr.repeat(b), z, R, T, K)
 
     strt = time.time()
     pred_noise = model(batch, cond_mask=torch.tensor([True] * b)).detach().cpu()
@@ -136,7 +145,6 @@ def p_mean_variance(model, x, z, R, T, K, logsnr, logsnr_next, w=2.0):
 def warmup(optimizer, step, last_step, last_lr):
     if step < last_step:
         optimizer.param_groups[0]['lr'] = step / last_step * last_lr
-
     else:
         optimizer.param_groups[0]['lr'] = last_lr
 
