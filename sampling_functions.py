@@ -41,19 +41,26 @@ def p_mean_variance(model, x, z, R, T, K, logsnr, logsnr_next, w):
     @return: model_mean: Tensor[B, C, H, W], posterior_variance: Tensor[]
     """
 
-    # todo: connect this code to equations / theory somehow
+    # todo: connect this code to equations / theory , possibly fix issues
     w = w[:, None, None, None]
     b = w.shape[0]
     c = - torch.special.expm1(logsnr - logsnr_next)   # -1 * (exp(logsnr - logsnr_next) - 1)
     squared_alpha, squared_alpha_next = logsnr.sigmoid(), logsnr_next.sigmoid()
     squared_sigma, squared_sigma_next = (-logsnr).sigmoid(), (-logsnr_next).sigmoid()
-
     alpha, sigma, alpha_next = map(lambda x: x.sqrt(), (squared_alpha, squared_sigma, squared_alpha_next))
+    # note: due to sigmoid properties, alpha^2 + sigma^2 = 1
 
+    # get two noise predictions from the model: one conditioned on x, one unconditioned.
+    # then do linear combination on them using w to get final predicted noise
+    #  (different combination for each of the 8 samples)
     batch = xt2batch(x, logsnr.repeat(b), z, R, T, K)
     pred_noise = model(batch, cond_mask=torch.tensor([True] * b)).detach().cpu()
     batch['x'] = torch.randn_like(x).to(device)
     pred_noise_unconditioned = model(batch, cond_mask=torch.tensor([False] * b)).detach().cpu()
+
+    # TODO: From here down - looks somewhat wrong, but need to learn more.
+    #  w is list(range(8)) so the linear combination of noise is very strange (although appears in flax impl as well)
+    #  z_start values are huge (>10000) and clipped to [-1, 1]
     pred_noise_final = (1 + w) * pred_noise - w * pred_noise_unconditioned
 
     z = z.detach().cpu()
@@ -93,9 +100,9 @@ def sample(model, record, target_R, target_T, K, w, timesteps=256):
     Runs the entire diffusion flow and samples a batch of images form the model.
     @param model: torch model
     @param record: list of lists: [[ref_image: Tensor[B, C, H, W], ref_R: Tensor[3, 3],  ref_T: Tensor[3,]]]
-    @param target_R: Target cam rotation
-    @param target_T: target cam location
-    @param K: cam intrinsics
+    @param target_R: Tensor [3, 3] - Target cam rotation
+    @param target_T: Tensor [3,] - target cam location
+    @param K: Tensor[3, 3] -  cam intrinsics
     @param w: list: [0,..., B] B = batch size to sample
     @param timesteps: diffusion timesteps
     @return: final diffusion sample image batch

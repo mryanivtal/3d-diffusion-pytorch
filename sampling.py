@@ -14,7 +14,7 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # === Parse arguments ===
 parser = argparse.ArgumentParser()
-parser.add_argument('--model', type=str, default=None)
+parser.add_argument('--model', type=str, default="./checkpt/latest.pt")
 parser.add_argument('--refimagedir', type=str, default="../datasets/srn_cars/cars_train/a4d535e1b1d3c153ff23af07d9064736")
 parser.add_argument('--outdir', type=str, default="./samples")
 
@@ -59,7 +59,7 @@ model.to(device)
 
 if TRAINED_MODEL is not None:
     print(f'Loading model: {TRAINED_MODEL}...')
-    ckpt = torch.load(TRAINED_MODEL)
+    ckpt = torch.load(TRAINED_MODEL, map_location=torch.device(device))
     model.load_state_dict(ckpt['model'])
 else:
     print('***PLEASE NOTE*** - working with untrained model, please expect gaussian noise as input!')
